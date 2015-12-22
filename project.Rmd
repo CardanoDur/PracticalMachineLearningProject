@@ -1,0 +1,81 @@
+---
+title: "Practical Machine Learning Class Project"
+author: "Jason Frakes"
+date: "December 22, 2015"
+output: html_document
+---
+
+##Overview
+The goal of the class project for Practical Machine Learning is to build an algorithm that will as correctly as possible predict a participants activity based on measure ments from four separate accelerometers.  We were given a set of training data with nearly 20k observations and 160 variables with 1 activity that the model should predict.  After several iterations of building models against the training data, the best model we could create was run against a test data set of 20 observations.
+
+##Data Background (from assignment)
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)
+
+##Walkthrough
+My first task was to go through the data.  The first few variables are all metadata elements that would not be relavent to the model.  There are also a large number of columns that have a strong majority of blanks or NA's, so those are removed as well.  Finally, there are some columns that are aggregations of others, like the columns that start with "final", so I removed all of those aggregation columns as well.  My final number of variables was 48 with an additional column being the outcome that we need to build our model around.
+
+Forty-eight varibles is still a large number of variables, too much to build a feature plot against (would consist of 2401 square plots, hard to fit on 8.5x11), so I just started getting into the data.  I knew I wanted to pre-process the data, so I used the "BoxCox" pre-process method of caret.  This was a large amount of data and I wanted to reduce it as much as I could.
+
+My plan was to try three separate methods, then depending on the results I would start combining if need.  I was goin to use the Gradiant Boosted Method, Linear Discriminant Analysis, and Random Forests (probably because they were stuck in my head from the quiz question), each of which would use the *Cross Validation* method to further minimize errors.  I had read in the forums that random forests could kill your machine.  Using my work laptop I thought I would try anyway, and yes, it killed my almost four year old machine.  Unfortunately so did the other methods.  But I had a *Eureka moment*, I have access to a 24 core Linux box with RStudio.  So I ran everything there using doParallel to spread all of the calculations out in parallel across the cores.  That made mincemeat of Caret.
+
+##The Code
+```{r, cache=TRUE}
+library(caret)
+library(doParallel)
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+
+training <- training[,-c(1:7)]
+training <- training[, -grep(c("total_|kurtosis_|skewness_|max_|min_|amplitude_|avg_|stddev_|var_"), colnames(training))]
+
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+
+modFitGBM <- train(classe ~ .,method="gbm",data=training,verbose=F,preProcess=c("BoxCox"),trControl=trainControl(method="cv",number=3))
+predGBM <- predict(modFitGBM, training)
+cmGBM <- confusionMatrix(predGBM, training$classe)
+
+modFitLDA <- train(classe ~ .,method="lda",data=training,preProcess=c("BoxCox"),trControl=trainControl(method="cv",number=3))
+predLDA <- predict(modFitLDA, training)
+cmLDA <- confusionMatrix(predLDA, training$classe)
+
+modFitRF <- train(classe ~ .,method="rf",data=training,preProcess=c("BoxCox"),trControl=trainControl(method="cv",number=3))
+predRF <- predict(modFitRF, training)
+cmRF <- confusionMatrix(predRF, training$classe)
+
+predTestRF <- predict(modFitRF, testing)
+predTestRF <- as.character(predTestRF)
+
+stopCluster(cl)
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predTestRF)
+```
+
+##Results
+Turns out I didn't need to combine models because after some sub-par results using GBM and LDA, the Random Forest method nailed it.  Here are the Confusion Matricies for each:
+
+GBM - 
+```{r echo=FALSE} 
+cmGBM
+```
+
+LDA - 
+```{r echo=FALSE} 
+cmLDA
+```
+
+RF - 
+```{r echo=FALSE} 
+cmRF
+```
+
+**So obviously I chose to use the Random Forest model.  This was then run against the test data and all twenty tests were outputed to a text file.  After uploading the model was 100% correct, 20 out of 20.**
